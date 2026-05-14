@@ -92,8 +92,9 @@ so you can see what is being called; password-specific calls are redacted.
 This script will configure this machine for testing by doing the following:
 
   • Install packages:
-      OpenSSH server/client first, then git, curl, Swift via swiftly,
-      Avahi/mDNS tools, GNOME Remote Desktop support, and Neovim.
+      OpenSSH server/client first, then git, curl, build-essential,
+      Swift via swiftly, Avahi/mDNS tools, GNOME Remote Desktop support,
+      and Neovim.
 
   • Configure:
       SSH login via openssh-server as early as possible
@@ -164,6 +165,7 @@ install_packages() {
     avahi-daemon \
     avahi-discover \
     avahi-utils \
+    build-essential \
     ca-certificates \
     curl \
     dbus-x11 \
