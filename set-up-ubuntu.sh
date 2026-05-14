@@ -200,6 +200,17 @@ install_swiftly() {
     ok "swiftly installed"
   fi
 
+  info "Ensuring swiftly is loaded by interactive Bash shells"
+  run_as_user bash -c '
+    set -euo pipefail
+    bashrc="$HOME/.bashrc"
+    env_line="[ -f \"\${SWIFTLY_HOME_DIR:-\$HOME/.local/share/swiftly}/env.sh\" ] && . \"\${SWIFTLY_HOME_DIR:-\$HOME/.local/share/swiftly}/env.sh\""
+
+    touch "$bashrc"
+    grep -qxF "$env_line" "$bashrc" || printf "\n%s\n" "$env_line" >> "$bashrc"
+  '
+  ok "swiftly is loaded by interactive Bash shells"
+
   info "Ensuring a Swift toolchain is installed via swiftly"
   run_as_user bash -c '
     set -euo pipefail
