@@ -122,6 +122,7 @@ ask_for_password() {
   printf '\nUbuntu login password for %s: ' "$CURRENT_USER"
   read -rs LOGIN_PASSWORD
   printf '\n'
+  [[ -n "$LOGIN_PASSWORD" ]] || fail "Ubuntu login password cannot be empty; it is required for Remote Desktop credentials."
 
   info "Checking sudo access"
   sudo_authenticate || fail "sudo authentication failed."
@@ -174,7 +175,7 @@ install_packages() {
 }
 
 install_swiftly() {
-  if run_as_user bash -lc '
+  if run_as_user bash -c '
     swiftly_env="${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
     [[ ! -f "$swiftly_env" ]] || . "$swiftly_env"
     command -v swiftly >/dev/null 2>&1
@@ -182,7 +183,7 @@ install_swiftly() {
     ok "swiftly is already installed"
   else
     info "Installing swiftly for ${CURRENT_USER}"
-    run_as_user bash -lc '
+    run_as_user bash -c '
       set -euo pipefail
       tmp_dir="$(mktemp -d)"
       cleanup() { rm -rf "$tmp_dir"; }
@@ -200,7 +201,7 @@ install_swiftly() {
   fi
 
   info "Ensuring a Swift toolchain is installed via swiftly"
-  run_as_user bash -lc '
+  run_as_user bash -c '
     set -euo pipefail
 
     swiftly_env="${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
@@ -210,16 +211,12 @@ install_swiftly() {
 
     if ! command -v swiftly >/dev/null 2>&1; then
       echo "swiftly was installed, but is not on PATH yet. Open a new shell and run: swiftly install latest"
-      exit 0
-    fi
-
-    if command -v swift >/dev/null 2>&1; then
+    elif command -v swift >/dev/null 2>&1; then
       swift --version | head -n 1
-      exit 0
+    else
+      swiftly install latest
+      swiftly use latest
     fi
-
-    swiftly install latest
-    swiftly use latest
   '
   ok "Swift toolchain is available"
 }
@@ -229,7 +226,7 @@ configure_editor() {
   run_sudo update-alternatives --install /usr/bin/editor editor /usr/bin/nvim 100
   run_sudo update-alternatives --set editor /usr/bin/nvim
 
-  run_as_user bash -lc '
+  run_as_user bash -c '
     set -euo pipefail
     profile="$HOME/.profile"
     touch "$profile"
@@ -267,7 +264,7 @@ EOF
 configure_ssh_keys() {
   info "Generating SSH keys and installing authorized login keys"
 
-  run_as_user bash -lc '
+  run_as_user bash -c '
     set -euo pipefail
     mkdir -p "$HOME/.ssh"
     chmod 700 "$HOME/.ssh"
@@ -573,7 +570,7 @@ configure_git() {
 summary() {
   local hostname_ip public_key
   hostname_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  public_key="$(run_as_user bash -lc 'cat "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true')"
+  public_key="$(run_as_user bash -c 'cat "$HOME/.ssh/id_ed25519.pub" 2>/dev/null || true')"
 
   cat <<EOF
 
