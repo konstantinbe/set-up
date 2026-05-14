@@ -103,7 +103,8 @@ This script will configure this machine for testing by doing the following:
       Passwordless sudo for user: ${CURRENT_USER}
       Avahi/mDNS discovery and name resolution
       Remote Desktop sharing + control using the same username/password as ${CURRENT_USER}
-      No automatic suspend, dimming, screen blanking, or locking while on AC power
+      No automatic suspend, dimming, or screen blanking while on AC power
+      Screen locking disabled entirely, including lock-on-suspend
       Global git user.name (${GIT_NAME}) and user.email (${GIT_EMAIL}) for ${CURRENT_USER}
 
 You will be asked for your Ubuntu login password once. It is used to run sudo
@@ -393,7 +394,7 @@ configure_remote_desktop() {
 }
 
 configure_power_settings() {
-  info "Disabling automatic sleep, dimming, and locking while on AC power"
+  info "Disabling automatic sleep/blanking on AC power and screen locking entirely"
 
   run_sudo tee /usr/local/bin/ubuntu-test-ac-power-mode >/dev/null <<'EOF'
 #!/usr/bin/env bash
@@ -449,9 +450,6 @@ restore_default() {
 save_defaults() {
   save_default IDLE_DIM org.gnome.settings-daemon.plugins.power idle-dim
   save_default IDLE_DELAY org.gnome.desktop.session idle-delay
-  save_default LOCK_ENABLED org.gnome.desktop.screensaver lock-enabled
-  save_default LOCK_DELAY org.gnome.desktop.screensaver lock-delay
-  save_default UBUNTU_LOCK_ON_SUSPEND org.gnome.desktop.screensaver ubuntu-lock-on-suspend
 }
 
 is_on_ac_power() {
@@ -476,28 +474,32 @@ is_on_ac_power() {
   (( found_battery == 0 ))
 }
 
+apply_screen_lock_policy() {
+  # Screen locking is disabled entirely for this test-machine user, regardless
+  # of power source. This includes automatic locking, lock-on-suspend, and the
+  # explicit GNOME lock-screen action where supported.
+  set_setting org.gnome.desktop.screensaver lock-enabled false
+  set_setting org.gnome.desktop.screensaver lock-delay "uint32 0"
+  set_setting org.gnome.desktop.screensaver ubuntu-lock-on-suspend false
+  set_setting org.gnome.desktop.lockdown disable-lock-screen true
+}
+
 apply_ac_policy() {
   # AC-specific suspend behavior. Battery suspend settings are intentionally
   # left at their Ubuntu/GNOME defaults.
   set_setting org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type "nothing"
   set_setting org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
 
-  # GNOME does not expose AC-only keys for dimming, blanking, or locking, so
-  # this service applies those settings only while AC is connected and restores
-  # the previous values when the machine switches back to battery.
+  # GNOME does not expose AC-only keys for dimming or blanking, so this service
+  # applies those settings only while AC is connected and restores the previous
+  # values when the machine switches back to battery.
   set_setting org.gnome.settings-daemon.plugins.power idle-dim false
   set_setting org.gnome.desktop.session idle-delay "uint32 0"
-  set_setting org.gnome.desktop.screensaver lock-enabled false
-  set_setting org.gnome.desktop.screensaver lock-delay "uint32 0"
-  set_setting org.gnome.desktop.screensaver ubuntu-lock-on-suspend false
 }
 
 apply_battery_policy() {
   restore_default IDLE_DIM org.gnome.settings-daemon.plugins.power idle-dim
   restore_default IDLE_DELAY org.gnome.desktop.session idle-delay
-  restore_default LOCK_ENABLED org.gnome.desktop.screensaver lock-enabled
-  restore_default LOCK_DELAY org.gnome.desktop.screensaver lock-delay
-  restore_default UBUNTU_LOCK_ON_SUSPEND org.gnome.desktop.screensaver ubuntu-lock-on-suspend
 }
 
 apply_current_policy() {
@@ -508,6 +510,8 @@ apply_current_policy() {
   else
     apply_battery_policy
   fi
+
+  apply_screen_lock_policy
 }
 
 case "${1:-}" in
@@ -568,7 +572,7 @@ HandleLidSwitchExternalPower=ignore
 EOF
   run_sudo systemctl reload systemd-logind || run_sudo systemctl restart systemd-logind
 
-  ok "AC power policy configured; battery defaults are restored while on battery"
+  ok "AC power policy configured; screen locking disabled entirely"
 }
 
 configure_git() {
