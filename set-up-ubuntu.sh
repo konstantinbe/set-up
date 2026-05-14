@@ -92,15 +92,15 @@ so you can see what is being called; password-specific calls are redacted.
 This script will configure this machine for testing by doing the following:
 
   • Install packages:
-      git, curl, OpenSSH server/client, Swift via swiftly, Avahi/mDNS tools,
-      GNOME Remote Desktop support, and Neovim.
+      OpenSSH server/client first, then git, curl, Swift via swiftly,
+      Avahi/mDNS tools, GNOME Remote Desktop support, and Neovim.
 
   • Configure:
-      Neovim as the default CLI editor
-      Passwordless sudo for user: ${CURRENT_USER}
-      SSH login via openssh-server
+      SSH login via openssh-server as early as possible
       SSH key generation for ${CURRENT_USER}
       Passwordless SSH login keys for konstantinbe and ai
+      Neovim as the default CLI editor
+      Passwordless sudo for user: ${CURRENT_USER}
       Avahi/mDNS discovery and name resolution
       Remote Desktop sharing + control using the same username/password as ${CURRENT_USER}
       No automatic suspend, dimming, screen blanking, or locking while on AC power
@@ -130,6 +130,15 @@ ask_for_password() {
   ok "git identity will be set to ${GIT_NAME} <${GIT_EMAIL}>"
 }
 
+install_ssh_packages() {
+  info "Installing OpenSSH server/client first"
+  run_sudo apt-get update
+  run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    openssh-client \
+    openssh-server
+  ok "OpenSSH packages installed"
+}
+
 install_packages() {
   info "Updating apt package indexes"
   run_sudo apt-get update
@@ -147,7 +156,7 @@ install_packages() {
   fi
   ok "universe repository is available"
 
-  info "Installing base tools, SSH, Avahi, GNOME Remote Desktop, and Neovim"
+  info "Installing base tools, Avahi, GNOME Remote Desktop, and Neovim"
   run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
     avahi-autoipd \
     avahi-daemon \
@@ -160,9 +169,7 @@ install_packages() {
     gnome-remote-desktop \
     libnss-mdns \
     mdns-scan \
-    neovim \
-    openssh-client \
-    openssh-server
+    neovim
   ok "packages installed"
 }
 
@@ -592,12 +599,13 @@ main() {
   confirm_plan
   ask_for_password
   enable_command_trace
+  install_ssh_packages
+  configure_ssh
+  configure_ssh_keys
   configure_passwordless_sudo
   install_packages
   install_swiftly
   configure_editor
-  configure_ssh
-  configure_ssh_keys
   configure_avahi
   configure_remote_desktop
   configure_power_settings
