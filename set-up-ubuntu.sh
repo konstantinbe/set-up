@@ -103,6 +103,7 @@ This script will configure this machine for testing by doing the following:
       Passwordless SSH login keys for konstantinbe and ai
       Avahi/mDNS discovery and name resolution
       Remote Desktop sharing + control using the same username/password as ${CURRENT_USER}
+      No automatic suspend, dimming, screen blanking, or locking while on AC power
       Global git user.name (${GIT_NAME}) and user.email (${GIT_EMAIL}) for ${CURRENT_USER}
 
 You will be asked for your Ubuntu login password once. It is used to run sudo
@@ -358,6 +359,185 @@ configure_remote_desktop() {
   ok "GNOME Remote Desktop configured where supported"
 }
 
+configure_power_settings() {
+  info "Disabling automatic sleep, dimming, and locking while on AC power"
+
+  run_sudo tee /usr/local/bin/ubuntu-test-ac-power-mode >/dev/null <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly CHECK_INTERVAL_SECONDS="${CHECK_INTERVAL_SECONDS:-30}"
+readonly STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/ubuntu-test-setup"
+readonly DEFAULTS_FILE="${STATE_DIR}/power-defaults.env"
+
+mkdir -p "$STATE_DIR"
+touch "$DEFAULTS_FILE"
+
+run_gsettings() {
+  if [[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    gsettings "$@"
+  elif command -v dbus-launch >/dev/null 2>&1; then
+    dbus-launch gsettings "$@"
+  else
+    gsettings "$@"
+  fi
+}
+
+setting_exists() {
+  run_gsettings range "$1" "$2" >/dev/null 2>&1
+}
+
+set_setting() {
+  local schema="$1" key="$2" value="$3"
+  setting_exists "$schema" "$key" || return 0
+  run_gsettings set "$schema" "$key" "$value"
+}
+
+save_default() {
+  local name="$1" schema="$2" key="$3" value
+  setting_exists "$schema" "$key" || return 0
+  grep -q "^${name}=" "$DEFAULTS_FILE" && return 0
+
+  value="$(run_gsettings get "$schema" "$key")"
+  printf '%s=%q\n' "$name" "$value" >> "$DEFAULTS_FILE"
+}
+
+restore_default() {
+  local name="$1" schema="$2" key="$3" value
+  setting_exists "$schema" "$key" || return 0
+
+  # shellcheck disable=SC1090
+  source "$DEFAULTS_FILE"
+  eval "value=\${${name}:-}"
+  [[ -n "${value:-}" ]] || return 0
+  run_gsettings set "$schema" "$key" "$value"
+}
+
+save_defaults() {
+  save_default IDLE_DIM org.gnome.settings-daemon.plugins.power idle-dim
+  save_default IDLE_DELAY org.gnome.desktop.session idle-delay
+  save_default LOCK_ENABLED org.gnome.desktop.screensaver lock-enabled
+  save_default LOCK_DELAY org.gnome.desktop.screensaver lock-delay
+  save_default UBUNTU_LOCK_ON_SUSPEND org.gnome.desktop.screensaver ubuntu-lock-on-suspend
+}
+
+is_on_ac_power() {
+  local supply type online found_battery=0
+
+  for supply in /sys/class/power_supply/*; do
+    [[ -r "$supply/type" ]] || continue
+    type="$(<"$supply/type")"
+
+    if [[ "$type" == "Battery" ]]; then
+      found_battery=1
+      continue
+    fi
+
+    if [[ "$type" == "Mains" || "$type" == "USB" || "$type" == "USB_C" || "$type" == "USB_PD" ]]; then
+      online="$(<"$supply/online" 2>/dev/null || printf '0')"
+      [[ "$online" == "1" ]] && return 0
+    fi
+  done
+
+  # Desktops and VMs often have no battery; treat them as AC-powered.
+  (( found_battery == 0 ))
+}
+
+apply_ac_policy() {
+  # AC-specific suspend behavior. Battery suspend settings are intentionally
+  # left at their Ubuntu/GNOME defaults.
+  set_setting org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type "nothing"
+  set_setting org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
+
+  # GNOME does not expose AC-only keys for dimming, blanking, or locking, so
+  # this service applies those settings only while AC is connected and restores
+  # the previous values when the machine switches back to battery.
+  set_setting org.gnome.settings-daemon.plugins.power idle-dim false
+  set_setting org.gnome.desktop.session idle-delay "uint32 0"
+  set_setting org.gnome.desktop.screensaver lock-enabled false
+  set_setting org.gnome.desktop.screensaver lock-delay "uint32 0"
+  set_setting org.gnome.desktop.screensaver ubuntu-lock-on-suspend false
+}
+
+apply_battery_policy() {
+  restore_default IDLE_DIM org.gnome.settings-daemon.plugins.power idle-dim
+  restore_default IDLE_DELAY org.gnome.desktop.session idle-delay
+  restore_default LOCK_ENABLED org.gnome.desktop.screensaver lock-enabled
+  restore_default LOCK_DELAY org.gnome.desktop.screensaver lock-delay
+  restore_default UBUNTU_LOCK_ON_SUSPEND org.gnome.desktop.screensaver ubuntu-lock-on-suspend
+}
+
+apply_current_policy() {
+  save_defaults
+
+  if is_on_ac_power; then
+    apply_ac_policy
+  else
+    apply_battery_policy
+  fi
+}
+
+case "${1:-}" in
+  --once)
+    apply_current_policy
+    ;;
+  *)
+    while true; do
+      apply_current_policy
+      sleep "$CHECK_INTERVAL_SECONDS"
+    done
+    ;;
+esac
+EOF
+  run_sudo chmod 0755 /usr/local/bin/ubuntu-test-ac-power-mode
+
+  local uid runtime_dir session_bus user_unit_dir
+  uid="$(id -u "$CURRENT_USER")"
+  runtime_dir="/run/user/${uid}"
+  session_bus="unix:path=${runtime_dir}/bus"
+  user_unit_dir="$USER_HOME/.config/systemd/user"
+
+  run_as_user install -d -m 0755 "$user_unit_dir" "$user_unit_dir/default.target.wants"
+  run_as_user tee "$user_unit_dir/ubuntu-test-ac-power-mode.service" >/dev/null <<'EOF'
+[Unit]
+Description=Apply Ubuntu test-machine AC power policy
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ubuntu-test-ac-power-mode
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+EOF
+  run_as_user ln -sfn ../ubuntu-test-ac-power-mode.service \
+    "$user_unit_dir/default.target.wants/ubuntu-test-ac-power-mode.service"
+
+  run_sudo loginctl enable-linger "$CURRENT_USER"
+
+  if [[ -S "${runtime_dir}/bus" ]]; then
+    run_as_user env XDG_RUNTIME_DIR="$runtime_dir" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
+      /usr/local/bin/ubuntu-test-ac-power-mode --once
+    run_as_user env XDG_RUNTIME_DIR="$runtime_dir" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
+      systemctl --user daemon-reload
+    run_as_user env XDG_RUNTIME_DIR="$runtime_dir" DBUS_SESSION_BUS_ADDRESS="$session_bus" \
+      systemctl --user enable --now ubuntu-test-ac-power-mode.service
+  else
+    warn "No active user session bus found; AC power policy service will start on the next login."
+  fi
+
+  run_sudo install -d -m 0755 /etc/systemd/logind.conf.d
+  run_sudo tee /etc/systemd/logind.conf.d/99-testing-ac-power.conf >/dev/null <<'EOF'
+[Login]
+HandleLidSwitchExternalPower=ignore
+EOF
+  run_sudo systemctl reload systemd-logind || run_sudo systemctl restart systemd-logind
+
+  ok "AC power policy configured; battery defaults are restored while on battery"
+}
+
 configure_git() {
   info "Configuring git identity for ${CURRENT_USER}"
   run_as_user git config --global user.name "$GIT_NAME"
@@ -402,6 +582,7 @@ main() {
   configure_ssh_keys
   configure_avahi
   configure_remote_desktop
+  configure_power_settings
   configure_git
   summary
 }
