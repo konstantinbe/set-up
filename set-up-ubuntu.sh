@@ -93,7 +93,7 @@ This script will configure this machine for testing by doing the following:
 
   • Install packages:
       OpenSSH server/client first, then git, curl, build-essential,
-      Swift via swiftly, Avahi/mDNS tools, GNOME Remote Desktop support,
+      golang, Swift via swiftly, Avahi/mDNS tools, GNOME Remote Desktop support,
       and Neovim.
 
   • Configure:
@@ -170,6 +170,7 @@ install_packages() {
     curl \
     dbus-x11 \
     git \
+    golang \
     gnome-remote-desktop \
     libnss-mdns \
     mdns-scan \
