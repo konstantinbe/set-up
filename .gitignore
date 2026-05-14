@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Editor and swap files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Environment files
+.env
+.env.*
+!.env.example
