@@ -167,11 +167,28 @@ install_packages() {
 }
 
 install_swiftly() {
-  if [[ -x "$USER_HOME/.local/bin/swiftly" ]]; then
+  if run_as_user bash -lc '
+    swiftly_env="${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+    [[ ! -f "$swiftly_env" ]] || . "$swiftly_env"
+    command -v swiftly >/dev/null 2>&1
+  '; then
     ok "swiftly is already installed"
   else
     info "Installing swiftly for ${CURRENT_USER}"
-    run_as_user bash -lc 'curl -fsSL https://swiftlang.github.io/swiftly/swiftly-install.sh | bash -s -- -y'
+    run_as_user bash -lc '
+      set -euo pipefail
+      tmp_dir="$(mktemp -d)"
+      cleanup() { rm -rf "$tmp_dir"; }
+      trap cleanup EXIT
+
+      cd "$tmp_dir"
+      archive="swiftly-$(uname -m).tar.gz"
+      curl -fLO "https://download.swift.org/swiftly/linux/${archive}"
+      tar zxf "$archive"
+      ./swiftly init --quiet-shell-followup
+      . "${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+      hash -r
+    '
     ok "swiftly installed"
   fi
 
@@ -179,8 +196,9 @@ install_swiftly() {
   run_as_user bash -lc '
     set -euo pipefail
 
-    if [[ -f "$HOME/.local/share/swiftly/env.sh" ]]; then
-      source "$HOME/.local/share/swiftly/env.sh"
+    swiftly_env="${SWIFTLY_HOME_DIR:-$HOME/.local/share/swiftly}/env.sh"
+    if [[ -f "$swiftly_env" ]]; then
+      source "$swiftly_env"
     fi
 
     if ! command -v swiftly >/dev/null 2>&1; then
