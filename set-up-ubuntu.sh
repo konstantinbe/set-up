@@ -9,6 +9,8 @@ fi
 CURRENT_USER="${SUDO_USER:-${USER}}"
 USER_HOME="$(getent passwd "$CURRENT_USER" | cut -d: -f6)"
 SUDOERS_FILE="/etc/sudoers.d/90-${CURRENT_USER}-passwordless"
+GIT_NAME="Konstantin Bender"
+GIT_EMAIL="me@konstantinbender.com"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
@@ -55,7 +57,7 @@ This script will configure this machine for testing by doing the following:
       Passwordless SSH login keys for konstantinbe and ai
       Avahi/mDNS discovery and name resolution
       Remote Desktop sharing + control using the same username/password as ${CURRENT_USER}
-      Global git user.name and user.email for ${CURRENT_USER}
+      Global git user.name (${GIT_NAME}) and user.email (${GIT_EMAIL}) for ${CURRENT_USER}
 
 You will be asked for your Ubuntu login password once. It is used to run sudo
 commands and to set the GNOME Remote Desktop credentials to match your login.
@@ -78,27 +80,7 @@ ask_inputs() {
   run_sudo -v || fail "sudo authentication failed."
   ok "sudo access confirmed"
 
-  local existing_git_name existing_git_email
-  existing_git_name="$(run_sudo -u "$CURRENT_USER" -H git config --global --get user.name 2>/dev/null || true)"
-  existing_git_email="$(run_sudo -u "$CURRENT_USER" -H git config --global --get user.email 2>/dev/null || true)"
-
-  if [[ -n "$existing_git_name" ]]; then
-    printf '\nGit user.name [%s]: ' "$existing_git_name"
-  else
-    printf '\nGit user.name: '
-  fi
-  read -r GIT_NAME
-  GIT_NAME="${GIT_NAME:-$existing_git_name}"
-  [[ -n "$GIT_NAME" ]] || fail "git user.name cannot be empty."
-
-  if [[ -n "$existing_git_email" ]]; then
-    printf 'Git user.email [%s]: ' "$existing_git_email"
-  else
-    printf 'Git user.email: '
-  fi
-  read -r GIT_EMAIL
-  GIT_EMAIL="${GIT_EMAIL:-$existing_git_email}"
-  [[ -n "$GIT_EMAIL" ]] || fail "git user.email cannot be empty."
+  ok "git identity will be set to ${GIT_NAME} <${GIT_EMAIL}>"
 }
 
 install_packages() {
